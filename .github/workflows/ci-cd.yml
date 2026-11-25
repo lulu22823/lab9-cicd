@@ -1,0 +1,53 @@
+name: CI/CD Docker to EC2
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/nodejs-api-cicd:${{ github.sha }}
+      CONTAINER_PORT: 3001
+      HOST_PORT: 3002
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t "$IMAGE" .
+
+      - name: Check application
+        run: |
+          docker run -d --name lab9-test -p "${HOST_PORT}:${CONTAINER_PORT}" "$IMAGE"
+          RESPONSE=$(curl -sS --retry 5 --retry-connrefused "http://localhost:${HOST_PORT}/")
+          echo "Response: $RESPONSE"
+          docker rm -f lab9-test
+          echo "$RESPONSE" | grep -q "Lab9"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push image
+        run: docker push "$IMAGE"
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          passphrase: ${{ secrets.EC2_SSH_PASSPHRASE }}
+          fingerprint: ${{ vars.EC2_FINGERPRINT }}
+          envs: IMAGE,CONTAINER_PORT,HOST_PORT
+          script: |
+            sudo docker pull "$IMAGE"
+            sudo docker rm -f student-cicd-app || true
+            sudo docker run -d --name student-cicd-app \
+              --restart unless-stopped \
+              -p "${HOST_PORT}:${CONTAINER_PORT}" "$IMAGE"
