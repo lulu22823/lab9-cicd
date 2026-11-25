@@ -1,0 +1,28 @@
+name: PR Check (CI)
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    env:
+      CONTAINER_PORT: 3001
+      HOST_PORT: 3002
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build -t nodejs-api-pr-test .
+
+      - name: Check application
+        run: |
+          docker run -d --name lab9-pr-test -p "${HOST_PORT}:${CONTAINER_PORT}" nodejs-api-pr-test
+          sleep 3
+          RESPONSE=$(curl -sS --retry 5 --retry-all-errors "http://localhost:${HOST_PORT}/")
+          echo "Response: $RESPONSE"
+          docker rm -f lab9-pr-test
+          echo "$RESPONSE" | grep -q "Lab9"
